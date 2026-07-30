@@ -1,12 +1,62 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hu">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Website</title>
+    <title>ToplistUI</title>
+    <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-    <h1>Welcome!</h1>
-    <p>This is my first HTML page.</p>
+
+<div class="container">
+
+    <div class="toolbar">
+
+        <label for="year">Év</label>
+        <select id="year">
+            <option value="2026">2026</option>
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+        </select>
+
+        <label for="event">Versenyszám</label>
+        <select id="event">
+        </select>
+
+        <button onclick="search()">
+            Keresés
+        </button>
+
+        <!-- <button onclick="calculateScores()">
+            Pontszámítás
+        </button> -->
+
+    </div>
+
+
+    <table id="results">
+        <thead>
+            <tr>
+                <th>Helyezés</th>
+                <th>Név</th>
+                <th>Klub</th>
+                <th>Eredmény</th>
+                <th>Pont</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            <tr>
+                <td colspan="5">
+                    Nincs adat
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script src="script.js"></script>
+
 </body>
 </html>
