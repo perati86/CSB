@@ -1,11 +1,49 @@
 let disciplineCodes = {};
 let athleteResults = [];
-const teamShortNames = [];
-const teamFullNames = [];
+let teamShortNames = [];
+let teamFullNames = [];
+let skipTeamChamps = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     loadDisciplineKeys();
+    loadTeamNames();
 });
+
+async function loadTeamNames() {
+    try {
+        const [shortResponse, fullResponse] = await Promise.all([
+            fetch("TeamShortNames.txt"),
+            fetch("TeamFullNames.txt"),
+        ]);
+
+        if (!shortResponse.ok || !fullResponse.ok) {
+            throw new Error("Failed to load team name files.");
+        }
+
+        const [shortText, fullText] = await Promise.all([
+            shortResponse.text(),
+            fullResponse.text(),
+        ]);
+
+        teamShortNames = shortText
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+        teamFullNames = fullText
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+        if (teamShortNames.length !== teamFullNames.length) {
+            console.warn(
+                "TeamShortNames and TeamFullNames have different lengths."
+            );
+        }
+    } catch (error) {
+        console.error("Error loading team name lists:", error);
+    }
+}
 
 async function loadDisciplineKeys() {
     try {
@@ -43,27 +81,69 @@ async function getHtmlDocumentFromUrl(url) {
 }
 
 function findTeamChampsRows(doc) {
-    const headers = [...doc.querySelectorAll("h3")].filter(
-        (h3) => h3.textContent.trim() === "Eredmények"
+    const xpath = "//h3[text()='Eredmények']/following::table[1]//tr[not(th)]";
+    const iterator = doc.evaluate(
+        xpath,
+        doc,
+        null,
+        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+        null
     );
 
-    for (const header of headers) {
-        let next = header.nextElementSibling;
-        while (next) {
-            if (next.tagName === "TABLE") {
-                return [...next.querySelectorAll("tr")].filter(
-                    (row) => !row.querySelector("th")
-                );
-            }
-            next = next.nextElementSibling;
-        }
+    const rows = [];
+    for (let i = 0; i < iterator.snapshotLength; i += 1) {
+        rows.push(iterator.snapshotItem(i));
     }
 
-    return [];
+    return rows;
 }
 
 function orderAthleteResults(results, isTrackEvent) {
-    return [...results];
+    const parseResultValue = (value) => {
+        if (!value) return NaN;
+        const normalized = value.trim().replace(/,/g, ".");
+        const timeMatch = normalized.match(/^(\d+):(\d{2}(?:\.\d+)?)$/);
+        if (timeMatch) {
+            const minutes = Number(timeMatch[1]);
+            const seconds = Number(timeMatch[2]);
+            return minutes * 60 + seconds;
+        }
+
+        const numeric = parseFloat(normalized);
+        return Number.isFinite(numeric) ? numeric : NaN;
+    };
+
+    const hasLetter = (value) => /[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű]/.test(value || "");
+
+    return [...results].sort((a, b) => {
+        const aText = a.Result?.trim() ?? "";
+        const bText = b.Result?.trim() ?? "";
+        const aHasLetter = hasLetter(aText);
+        const bHasLetter = hasLetter(bText);
+
+        if (aHasLetter && !bHasLetter) {
+            return 1;
+        }
+        if (!aHasLetter && bHasLetter) {
+            return -1;
+        }
+
+        const aValue = parseResultValue(aText);
+        const bValue = parseResultValue(bText);
+
+        if (Number.isFinite(aValue) && Number.isFinite(bValue)) {
+            const compare = aValue - bValue;
+            return isTrackEvent ? compare : -compare;
+        }
+
+        if (aText === bText) {
+            return 0;
+        }
+
+        return isTrackEvent
+            ? aText.localeCompare(bText, undefined, { numeric: true, sensitivity: "base" })
+            : bText.localeCompare(aText, undefined, { numeric: true, sensitivity: "base" });
+    });
 }
 
 function updateResultsTable(results) {
@@ -115,27 +195,34 @@ async function search() {
         return;
     }
 
+    skipTeamChamps = selectedDiscipline === 215 || selectedDiscipline === 327;
+    console.log(skipTeamChamps ? "Skipping team championships data." : "Including team championships data.");
     const toplistUrl = `https://apps.atletika.hu/opentoplist/top-list?web2=1&vsz=${selectedDiscipline}&ev=${year}&ko=8`;
     const teamChampsUrlD3 = `http://csb.masz.hu/${parseInt(year, 10) - 1}/D3/versenyszam/${selectedDiscipline}`;
     const teamChampsUrlD2 = `http://csb.masz.hu/${parseInt(year, 10) - 1}/D2/versenyszam/${selectedDiscipline}`;
 
     try {
         const topListDoc = await getHtmlDocumentFromUrl(toplistUrl);
-        const teamChampsDocD2 = await getHtmlDocumentFromUrl(teamChampsUrlD2);
-        const teamChampsDocD3 = await getHtmlDocumentFromUrl(teamChampsUrlD3);
-
         const headerCells = [...topListDoc.querySelectorAll("thead tr th")];
         const toplistRows = [...topListDoc.querySelectorAll("tbody tr")];
-        const teamsChampsRowsD2 = findTeamChampsRows(teamChampsDocD2);
-        const teamsChampsRowsD3 = findTeamChampsRows(teamChampsDocD3);
-        const teamChampsRows = [...teamsChampsRowsD2, ...teamsChampsRowsD3];
+        let teamChampsRows = [];
+
+        if (!skipTeamChamps) {
+            const [teamChampsDocD2, teamChampsDocD3] = await Promise.all([
+                getHtmlDocumentFromUrl(teamChampsUrlD2),
+                getHtmlDocumentFromUrl(teamChampsUrlD3),
+            ]);
+            const teamsChampsRowsD2 = findTeamChampsRows(teamChampsDocD2);
+            const teamsChampsRowsD3 = findTeamChampsRows(teamChampsDocD3);
+            teamChampsRows = [...teamsChampsRowsD2, ...teamsChampsRowsD3];
+        }
 
         console.log("Data loaded successfully:", {
             toplistRowsCount: toplistRows.length,
             teamChampsRowsCount: teamChampsRows.length,
         });
 
-        if (!toplistRows.length || !teamChampsRows.length) {
+        if (!toplistRows.length || (!skipTeamChamps && !teamChampsRows.length)) {
             updateResultsTable([]);
             return;
         }
@@ -183,31 +270,35 @@ async function search() {
             });
         }
 
+        console.log("Initial results from toplist:", results);
+
         const birthTeamIndex = isRelay ? 5 : 2;
         const clubTeamIndex = isRelay ? 2 : 3;
         const resultTeamIndex = isRelay ? 3 : 4;
 
-        teamChampsRows.forEach((row) => {
-            const cells = [...row.querySelectorAll("td")];
-            const club = cells[clubTeamIndex]?.textContent.trim() || "";
+        if (!skipTeamChamps) {
+            teamChampsRows.forEach((row) => {
+                const cells = [...row.querySelectorAll("td")];
+                const club = cells[clubTeamIndex]?.textContent.trim() || "";
 
-            if (!teamFullNames.includes(club)) {
-                return;
-            }
-
-            if (cells.length >= 7) {
-                const result = {
-                    Name: cells[1]?.textContent.trim() || "",
-                    Club: club,
-                    BirthYear: isRelay ? "" : cells[birthTeamIndex]?.textContent.trim().substring(2, 4) || "",
-                    Result: cells[resultTeamIndex]?.textContent.trim() || "",
-                };
-
-                if (!results.some((r) => r.Name === result.Name && r.BirthYear === result.BirthYear)) {
-                    results.push(result);
+                if (!teamFullNames.includes(club)) {
+                    return;
                 }
-            }
-        });
+
+                if (cells.length >= 7) {
+                    const result = {
+                        Name: cells[1]?.textContent.trim() || "",
+                        Club: club,
+                        BirthYear: isRelay ? "" : cells[birthTeamIndex]?.textContent.trim().substring(2, 4) || "",
+                        Result: cells[resultTeamIndex]?.textContent.trim() || "",
+                    };
+
+                    if (!results.some((r) => r.Name === result.Name && r.BirthYear === result.BirthYear)) {
+                        results.push(result);
+                    }
+                }
+            });
+        }
 
         const isTrackEvent = /\d/.test(selectedDisciplineName);
         athleteResults = orderAthleteResults(results, isTrackEvent);
@@ -215,6 +306,8 @@ async function search() {
         athleteResults.forEach((result, index) => {
             result.Score = Math.max(16 - index, 0);
         });
+
+        console.log("Final athlete results:", athleteResults);
 
         updateResultsTable(athleteResults);
     } catch (error) {
