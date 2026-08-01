@@ -3,6 +3,7 @@ let athleteResults = [];
 let teamShortNames = [];
 let teamFullNames = [];
 let skipTeamChamps = false;
+const proxyBase = "https://stately-conkies-cb5dad.netlify.app/api/proxy?url=";
 
 document.addEventListener("DOMContentLoaded", () => {
     loadDisciplineKeys();
@@ -71,13 +72,26 @@ async function loadDisciplineKeys() {
 }
 
 async function getHtmlDocumentFromUrl(url) {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to load URL ${url}: ${response.status}`);
-    }
+    try {
+        const response = await fetch(url);
 
-    const html = await response.text();
-    return new DOMParser().parseFromString(html, "text/html");
+        if (!response.ok) {
+            const body = await response.text().catch(() => "<no body>");
+            console.error("Proxy fetch failed", {
+                url,
+                status: response.status,
+                statusText: response.statusText,
+                bodySnippet: body.slice ? body.slice(0, 200) : String(body),
+            });
+            throw new Error(`Failed to load URL ${url}: ${response.status} ${response.statusText}`);
+        }
+
+        const html = await response.text();
+        return new DOMParser().parseFromString(html, "text/html");
+    } catch (err) {
+        console.error("getHtmlDocumentFromUrl error for", url, err);
+        throw err;
+    }
 }
 
 function findTeamChampsRows(doc) {
@@ -202,15 +216,15 @@ async function search() {
     const teamChampsUrlD2 = `http://csb.masz.hu/${parseInt(year, 10) - 1}/D2/versenyszam/${selectedDiscipline}`;
 
     try {
-        const topListDoc = await getHtmlDocumentFromUrl(toplistUrl);
+        const topListDoc = await getHtmlDocumentFromUrl(`${proxyBase}${encodeURIComponent(toplistUrl)}`);
         const headerCells = [...topListDoc.querySelectorAll("thead tr th")];
         const toplistRows = [...topListDoc.querySelectorAll("tbody tr")];
         let teamChampsRows = [];
 
         if (!skipTeamChamps) {
             const [teamChampsDocD2, teamChampsDocD3] = await Promise.all([
-                getHtmlDocumentFromUrl(teamChampsUrlD2),
-                getHtmlDocumentFromUrl(teamChampsUrlD3),
+                getHtmlDocumentFromUrl(`${proxyBase}${encodeURIComponent(teamChampsUrlD2)}`),
+                getHtmlDocumentFromUrl(`${proxyBase}${encodeURIComponent(teamChampsUrlD3)}`),
             ]);
             const teamsChampsRowsD2 = findTeamChampsRows(teamChampsDocD2);
             const teamsChampsRowsD3 = findTeamChampsRows(teamChampsDocD3);
